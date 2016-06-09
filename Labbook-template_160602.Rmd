@@ -1,0 +1,128 @@
+---
+title: "Predicting POSTQ success from SOLOQ"
+output: 
+  html_document:
+    toc: true
+    date: true
+---
+Author: Jared Stang/Simmer Mand
+
+Date: June 9, 2016
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Loading up and describing the data
+
+
+```{r echo}
+require(lme4)
+# This analysis file needs to be in the same directory as the data file
+mydata <- read.csv("MT2 4groups.csv")
+```
+
+The following define the columns in the data:
+
+* ID: The unique student ID for this test
+* GROUPID: The unique group ID for this particular test
+* SOLOSCORE: The student's score on the individual part of the exam
+* SECTION: Which course section the student was in (201, 202, or 203)
+* QNUM: The question number (1-5)
+* SOLOQ: Binary; whether or not they got this question right on the individual part
+* GROUPQ: Binary; whether or not the group got this question right
+* POSTQ: Binary; whether or not this individual got the follow-up clicker question right
+* GPTSQ: The number of points they earned for the group question. (4 for correct on the first try, 2 for correct on the second try, 1 for correct on the third try, 0 otherwise.)
+* FEMALE: 1 if this student is female, 0 if they are male
+* FEMALEFRAC: Fraction of students in the group who are female
+* NGCORR: The number of students in the group that were correct on the solo version of the question.
+* NGROUP: Number of students in the group
+* TRY: How many tries it took them to get the question correct, as a group
+* NGCORRSZERO: Whether or not someone in the group had the correct answer. (0 if no one had the right answer---NGCORR = 0---and 1 if at least one person had the right answer---NGCORR > 0.)
+* NGCORRSONE: Is there only one person with the right answer? This is 0 if NGCORR is 1 and 1 if not.
+* FMMM: Binary: 1 if there are 3 male students and 1 female student, 0 else.
+* FFFM: Binary: 1 if there are 3 female students and 1 male student, 0 else.
+* Average: ???
+
+The following are categorical variables (meaning that although they might be a number, like SECTION, we want R to consider them all as completely separate):
+
+* ID: The unique student ID for this test
+* GROUPID: The unique group ID for this particular test
+* SECTION: Which course section the student was in (201, 202, or 203)
+* QNUM: The question number (1-5)
+
+We want to make sure R reads them as factors, and not continuous variables, so we set them as such.
+```{r}
+mydata$ID <- factor(mydata$ID)
+mydata$GROUPID <- factor(mydata$GROUPID)
+mydata$SECTION <- factor(mydata$SECTION)
+mydata$QNUM <- factor(mydata$QNUM)
+```
+
+Now, let's take a look at the data.
+```{r}
+head(mydata)
+```
+This gives us the first few rows of the data. We can see what the columns are and what some typical values are.
+
+## Create, run, and evaluate the logistic regression
+
+### The model
+We'll evaluate the most basic model: Predicting a student's performance on the follow-up clicker question (POSTQ) based on their performance on that question on the individual part of the exam (SOLOQ). Since not all five questions are equal, we'll include the question (QNUM) as a covariate.
+
+This model is $$\textrm{Log_odds}(\textrm{POSTQ}_{ij})=\beta_0+\beta_1\times\textrm{SOLOQ}_{ij}+\beta_{3,j}\times\textrm{QNUM}_j+\varepsilon_i.$$
+
+In this model, $\textrm{POSTQ}_{ij}$ is the binary success of student $i$ on clicker question $j$, $\textrm{SOLOQ}_{ij}$ is the binary success of student $i$ on the indvidual test question $j$ (the test question corresponding to the clicker question), $\textrm{QNUM}_j$ is the question number, and $\varepsilon_i$ is an error term for each student.
+
+We run this model with the following chunk of code:
+```{r}
+m <- glmer(POSTQ ~ SOLOQ  + QNUM + (1|ID) , data = mydata, family = binomial, control=glmerControl(optimizer='bobyqa'))
+# Summarize the results of the logistic regression
+print(summary(m))
+```
+The column "Estimate" lists the values in the model for the various $\beta$'s. The "Std. Error" describes the uncertainty in the Estimate, while "Pr(>|z|)" gives the p-value (test of significance) for the Estimate. In short, significant factors are those with small p-values (with asterisks beside them).
+
+In this example, we find that whether or not a student got the question right on the individual part of the midterm (SOLOQ) was a significant predictor of POSTQ success (it's p-value is really quite small). The interpretation of the Estimate is that a student who had $\textrm{SOLOQ}=1$ was $e^{0.56755}=1.76$ times more likely to get the corresponding POSTQ correct than if they had $\textrm{SOLOQ}=0$.
+
+Other items of note: The questions all had different difficulty. Compared to QNUM1, students were more likely to get QNUMS 2, 4, and 5 correct, while QNUM3 was more difficult. All of these were significant, so it's important to keep QNUM in for future models.
+
+### Evaluating the quality of the fit overall
+To evaluate the quality of the fit, we want to compare the model to the very simplest model, with no predictors in it at all. The log-likelihood of the model gives an indication of the goodness of the fit; comparing the log-likelihoods of our model to the very simplest model will tell use how much better our model is than the very simplest one. 
+```{r}
+LL1 = logLik(m)[1]
+df1 = attr(logLik(m),"df")
+```
+The quality of fit (the log-likelihood `LL1` of our model) is `r LL1`, and the number of degrees of freedom `df1` is `r df1`.
+
+Now, we evaluate the very simplest model, with no predictors at all, to find the log-likelihood of it.
+```{r}
+# Evaluate the very simplest model
+m0 <- glm(POSTQ ~ 1, data = mydata, family = binomial)
+LL0 = logLik(m0)[1]
+df0 = attr(logLik(m0),"df")
+```
+The quality of fit for the very simplest model (the log-likelihood `LL0` of this model) is `r LL0`, and the number of degrees of freedom `df0` is `r df0`.
+
+Finally, we compare. The difference between the log-likelihoods (times -2) gives the statistic $G$, which follows a $\chi^2$ distribution. We can get an idea of the significance of our model from that.
+```{r}
+# Compare the two models
+G = -2*(LL1-LL0)
+pchi = pchisq(-G, df1 - df0, lower.tail = FALSE)
+```
+We find that $G=$ `r G`, with df = `r df1-df0` and $p=$ `r pchi`. $p<<0.01$, so our model, including SOLOQ and QNUM, is statistically significant overall.
+
+### Determining how many cases are correctly predicted by the model
+
+The accuracy of the model (the number of cases which are correctly predicted) is computed here:
+```{r}
+## To determine the correctly predicted cases
+fitted.results <- predict(m,newdata=mydata,type='response')
+fitted.results <- ifelse(fitted.results > 0.5,1,0)
+
+misClasificError <- mean(fitted.results != mydata$POSTQ)
+print(paste('Accuracy',1-misClasificError))
+
+```
+
+
